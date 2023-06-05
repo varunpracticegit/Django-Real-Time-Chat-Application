@@ -1,0 +1,169 @@
+{% extends 'core/base.html' %}
+
+{% block title %}{{ room.name }} | {% endblock %}
+
+{% block content %}
+<style>
+    .chat-messages {
+        height: 400px;
+        overflow-y: auto;
+    }
+
+    .current-user {
+        color: blue;
+        font-weight: bold;
+    }    
+
+    .message {
+        margin-bottom: 10px;
+    }
+
+    .message-content {
+        padding: 8px;
+        border-radius: 8px;
+        max-width: 70%;
+    }
+
+    .self .message-content {
+        background-color: #DCF8C6;
+        align-self: flex-end;
+    }
+
+    .other .message-content {
+        background-color: #F3F4F6;
+        align-self: flex-start;
+    }
+
+    .message-time {
+        font-size: 12px;
+        color: gray;
+    }
+</style>
+<div class="flex flex-wrap">
+    <div class="w-full lg:w-2/3 mt-6">
+        <div class="lg:w-2/3 mx-4 lg:mx-auto p-4 bg-white rounded-xl">
+            <div class="chat-messages space-y-3" id="chat-messages">
+                {% for m in messages %}
+                <div class="message {% if m.user == request.user %}self{% else %}other{% endif %}">
+                    <div class="message-content">
+                        <b class="{% if m.user == request.user %}current-user{% endif %}">{{ m.user.username }}</b>: {{ m.content }}
+                    </div>
+                    <div class="message-time">
+                        {{ m.date_added|time:"h:i A" }}
+                    </div>
+                </div>                
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="lg:w-2/3 mt-6 mx-4 lg:mx-auto p-4 bg-white rounded-xl">
+            <form method="post" action="." class="flex">
+                <input type="text" name="content" class="flex-1 mr-3" placeholder="Your message..." id="chat-message-input">
+
+                <button class="px-5 py-3 rounded-xl text-white bg-teal-600 hover:bg-teal-700" id="chat-message-submit">Submit</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="w-full lg:w-1/3">
+        <div class="lg:w-2/3 mt-6 mx-4 lg:mx-auto p-4 bg-white rounded-xl">
+            <div>
+                <h2 class="text-xl font-bold mb-4">Active Members: {{ room.users.count }}</h2>
+                <ol class="list-decimal ml-4">
+                    {% for user in room.users.all %}
+                        <li {% if user == request.user %}class="current-user"{% endif %}>{{ user.username }}</li>
+                    {% empty %}
+                        <li>No users in this room.</li>
+                    {% endfor %}
+                </ol>
+            </div>
+        </div>        
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+{{ room.slug|json_script:"json-roomname" }}
+{{ request.user.username|json_script:"json-username" }}
+
+<script>
+    const roomName = JSON.parse(document.getElementById('json-roomname').textContent);
+    const userName = JSON.parse(document.getElementById('json-username').textContent);
+    const chatSocket = new WebSocket(
+        'ws://'
+        + window.location.host
+        + '/ws/'
+        + roomName
+        + '/'
+    );
+
+    chatSocket.onclose = function(e) {
+        console.log('onclose')
+    }
+
+    chatSocket.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+
+        if (data.message) {
+            const currentTime = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
+            const messageHTML = `
+                <div class="message ${data.username === userName ? 'self' : 'other'}">
+                    <div class="message-content">
+                        <b>${data.username}</b>: ${data.message}
+                    </div>
+                    <div class="message-time">
+                        ${currentTime}
+                    </div>
+                </div>
+            `;
+            document.querySelector('#chat-messages').innerHTML += messageHTML;
+        } else {
+            {% comment %} alert('The message was empty!') {% endcomment %}
+        }
+
+        scrollToBottom();
+    };
+
+    document.querySelector('#chat-message-input').focus();
+    document.querySelector('#chat-message-input').onkeyup = function(e) {
+        if (e.keyCode === 13) {
+            document.querySelector('#chat-message-submit').click();
+        }
+    };
+
+    document.querySelector('#chat-message-submit').onclick = function(e) {
+        e.preventDefault()
+
+        const messageInputDom = document.querySelector('#chat-message-input');
+        const message = messageInputDom.value;
+
+        console.log({
+            'message': message,
+            'username': userName,
+            'room': roomName
+        })
+
+        chatSocket.send(JSON.stringify({
+            'message': message,
+            'username': userName,
+            'room': roomName
+        }));
+
+        messageInputDom.value = '';
+
+        return false
+    };
+
+    /**
+    * A function for finding the messages element, and scroll to the bottom of it.
+    */
+    function scrollToBottom() {
+        let objDiv = document.getElementById("chat-messages");
+        objDiv.scrollTop = objDiv.scrollHeight;
+    }
+
+    // Add this below the function to trigger the scroll on load.
+    scrollToBottom();
+</script>
+{% endblock %}
